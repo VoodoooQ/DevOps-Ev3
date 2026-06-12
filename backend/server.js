@@ -6,7 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const {
-  DB_HOST = tienda-db, // acá resuelve internamente en eks
+  DB_HOST = "tienda-db",
   DB_USER = "root",
   DB_PASSWORD = "admin123",
   DB_NAME = "tienda_perritos",
@@ -18,7 +18,6 @@ app.use(express.json());
 
 let pool;
 
-// Inicializar pool de conexiones
 async function initDb() {
   try {
     pool = mysql.createPool({
@@ -37,27 +36,29 @@ async function initDb() {
   }
 }
 
-// Helper para manejar errores
 function handleError(res, error, message = "Error interno del servidor") {
   console.error(error);
   res.status(500).json({ message });
 }
 
-// Obtener todos los productos
 app.get("/api/productos", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT id, nombre, descripcion, precio, stock FROM productos ORDER BY id DESC");
+    const [rows] = await pool.query(
+      "SELECT id, nombre, descripcion, precio, stock FROM productos ORDER BY id DESC"
+    );
     res.json(rows);
   } catch (err) {
     handleError(res, err, "No se pudieron obtener los productos.");
   }
 });
 
-// Obtener un producto por ID
 app.get("/api/productos/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    const [rows] = await pool.query("SELECT id, nombre, descripcion, precio, stock FROM productos WHERE id = ?", [id]);
+    const [rows] = await pool.query(
+      "SELECT id, nombre, descripcion, precio, stock FROM productos WHERE id = ?",
+      [id]
+    );
     if (rows.length === 0) {
       return res.status(404).json({ message: "Producto no encontrado." });
     }
@@ -67,7 +68,6 @@ app.get("/api/productos/:id", async (req, res) => {
   }
 });
 
-// Crear un nuevo producto
 app.post("/api/productos", async (req, res) => {
   const { nombre, descripcion, precio, stock } = req.body;
 
@@ -81,20 +81,22 @@ app.post("/api/productos", async (req, res) => {
       [nombre, descripcion || null, precio, stock]
     );
     const nuevoId = result.insertId;
-    const [rows] = await pool.query("SELECT id, nombre, descripcion, precio, stock FROM productos WHERE id = ?", [nuevoId]);
+    const [rows] = await pool.query(
+      "SELECT id, nombre, descripcion, precio, stock FROM productos WHERE id = ?",
+      [nuevoId]
+    );
     res.status(201).json(rows[0]);
   } catch (err) {
-    handleError(res, err, "No se pudo crear el Producto.");
+    handleError(res, err, "No se pudo crear el producto.");
   }
 });
 
-// Actualizar un producto
 app.put("/api/productos/:id", async (req, res) => {
   const { id } = req.params;
   const { nombre, descripcion, precio, stock } = req.body;
 
   if (!nombre || precio == null || stock == null) {
-    return res.status(400).json({ message: "Nombre, Precio y Stock son obligatorios." });
+    return res.status(400).json({ message: "Nombre, precio y stock son obligatorios." });
   }
 
   try {
@@ -107,14 +109,16 @@ app.put("/api/productos/:id", async (req, res) => {
       return res.status(404).json({ message: "Producto no encontrado." });
     }
 
-    const [rows] = await pool.query("SELECT id, nombre, descripcion, precio, stock FROM productos WHERE id = ?", [id]);
+    const [rows] = await pool.query(
+      "SELECT id, nombre, descripcion, precio, stock FROM productos WHERE id = ?",
+      [id]
+    );
     res.json(rows[0]);
   } catch (err) {
-    handleError(res, err, "No se pudo actualizar el Producto.");
+    handleError(res, err, "No se pudo actualizar el producto.");
   }
 });
 
-// Eliminar un producto
 app.delete("/api/productos/:id", async (req, res) => {
   const { id } = req.params;
   try {
@@ -124,19 +128,17 @@ app.delete("/api/productos/:id", async (req, res) => {
     }
     res.json({ message: "Producto eliminado correctamente." });
   } catch (err) {
-    handleError(res, err, "No se pudo eliminar el Producto.");
+    handleError(res, err, "No se pudo eliminar el producto.");
   }
 });
 
-// Endpoint de salud para Kubernetes
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: "ok",
-    message: "Backend de tienda de perritos en ejecución."
+    message: "Backend de tienda de perritos en ejecucion.",
   });
 });
 
-// Iniciar servidor
 app.listen(PORT, async () => {
   console.log(`Servidor backend escuchando en puerto ${PORT}`);
   await initDb();

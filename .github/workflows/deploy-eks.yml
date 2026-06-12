@@ -1,0 +1,88 @@
+name: Deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+  ECR_BACKEND_REPOSITORY: ${{ vars.ECR_BACKEND_REPOSITORY }}
+  ECR_DB_REPOSITORY: ${{ vars.ECR_DB_REPOSITORY }}
+  ECR_FRONTEND_REPOSITORY: ${{ vars.ECR_FRONTEND_REPOSITORY }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        run: |
+          docker build -t "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG" ./backend
+          docker push "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG"
+
+      - name: Build and push database image
+        run: |
+          docker build -t "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_DB_REPOSITORY:$IMAGE_TAG" ./db
+          docker push "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_DB_REPOSITORY:$IMAGE_TAG"
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG" ./frontend
+          docker push "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG"
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Create namespace and MySQL secret
+        run: |
+          kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic mysql-secret \
+            --namespace "$K8S_NAMESPACE" \
+            --from-literal=MYSQL_ROOT_PASSWORD='${{ secrets.MYSQL_ROOT_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Render image references
+        run: |
+          sed -i "s/__AWS_ACCOUNT_ID__/$AWS_ACCOUNT_ID/g" k8s/mysql-deployment.yaml k8s/backend-deployment.yaml k8s/frontend-deployment.yaml
+          sed -i "s/__AWS_REGION__/$AWS_REGION/g" k8s/mysql-deployment.yaml k8s/backend-deployment.yaml k8s/frontend-deployment.yaml
+          sed -i "s/__IMAGE_TAG__/$IMAGE_TAG/g" k8s/mysql-deployment.yaml k8s/backend-deployment.yaml k8s/frontend-deployment.yaml
+          sed -i "s/__ECR_DB_REPOSITORY__/$ECR_DB_REPOSITORY/g" k8s/mysql-deployment.yaml
+          sed -i "s/__ECR_BACKEND_REPOSITORY__/$ECR_BACKEND_REPOSITORY/g" k8s/backend-deployment.yaml
+          sed -i "s/__ECR_FRONTEND_REPOSITORY__/$ECR_FRONTEND_REPOSITORY/g" k8s/frontend-deployment.yaml
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/mysql-deployment.yaml
+          kubectl apply -f k8s/mysql-service.yaml
+          kubectl apply -f k8s/backend-deployment.yaml
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl apply -f k8s/backend-hpa.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+          kubectl apply -f k8s/frontend-hpa.yaml
+
+      - name: Wait for rollouts
+        run: |
+          kubectl rollout status deployment/tienda-db -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/tienda-backend -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/tienda-frontend -n "$K8S_NAMESPACE" --timeout=180s

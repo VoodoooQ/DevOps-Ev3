@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: mysql
-          image: 542768639545.dkr.ecr.us-east-1.amazonaws.com/tienda-db:eks-v1 # Colocar uri de tu imagen en ECR
+          image: __AWS_ACCOUNT_ID__.dkr.ecr.__AWS_REGION__.amazonaws.com/__ECR_DB_REPOSITORY__:__IMAGE_TAG__
           ports:
             - containerPort: 3306
           env:
